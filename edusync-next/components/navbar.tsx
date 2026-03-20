@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, Menu, X } from "lucide-react"
+import dynamic from "next/dynamic"
+import {  Menu, X } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -14,6 +15,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+
+const BookOpen = dynamic(
+  () => import('lucide-react').then(mod => mod.BookOpen),
+  { ssr: false }
+)
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard" },
@@ -36,7 +42,7 @@ export function Navbar({ showAuth = true, isLoggedIn = false }: NavbarProps) {
       <nav className="container mx-auto flex h-16 items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-            <BookOpen className="h-5 w-5 text-primary-foreground" />
+            <BookOpen className="h-5 w-5 text-primary-foreground" /> {/* 4. Use it normally */}
           </div>
           <span className="text-xl font-bold tracking-tight">EduSync</span>
         </Link>
