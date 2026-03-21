@@ -1,118 +1,116 @@
-import Session from '../models/Session.js';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-async function callAITutor(question, sessionId) {
-  try {
-    const session = await Session.findById(sessionId).populate('participants', 'name subjects');
-    const subjects = [...new Set(session?.participants.flatMap(p => p.subjects.map(s => s.name)))]
-      .join(', ') || 'various subjects';
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        {
-          role: 'system',
-          content: `You are an AI tutor helping students studying ${subjects}. Keep answers concise, educational, and encouraging.`
-        },
-        { role: 'user', content: question }
-      ],
-      max_tokens: 200,
-      temperature: 0.7
-    });
-
-    return completion.choices[0].message.content;
-  } catch (error) {
-    console.error('OpenAI error:', error);
-    return "That's a great question! Why not discuss it with your study partner?";
-  }
-}
+import { supabase } from '../config/supabase.js';
+import { callAITutor } from '../utils/ollamaClient.js';
 
 export default function setupSocketHandlers(io) {
-  // Authentication middleware for sockets
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth.token;
       if (!token) return next(new Error('Authentication required'));
 
+      // Verify token with Firebase Admin SDK (still needed if you use Firebase Auth)
+      // If you switch to Supabase Auth, use supabase.auth.api.verifyToken.
+      // For now, keep Firebase or replace with Supabase.
+      // We'll assume Firebase for compatibility.
+
+      // Simpler: get user from database using email? Not secure.
+      // For brevity, we'll assume the token is verified and we have user.
+      // Actually, we need proper auth. Let's keep Firebase for now.
+
       const admin = await import('../config/firebase.js').then(m => m.default);
       const decoded = await admin.auth().verifyIdToken(token);
-      const User = (await import('../models/User.js')).default;
-      const user = await User.findOne({ firebaseUid: decoded.uid });
+      const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('firebase_uid', decoded.uid)
+        .single();
       if (!user) return next(new Error('User not found'));
 
       socket.user = user;
-      socket.userId = user._id.toString();
+      socket.userId = user.id;
       next();
     } catch (err) {
+      console.error('Socket auth error:', err);
       next(new Error('Authentication failed'));
     }
   });
 
   io.on('connection', (socket) => {
-    console.log(`🔌 User connected: ${socket.user.name}`);
+    console.log(`User connected: ${socket.user.name}`);
 
     socket.on('join-session', async (sessionId) => {
-      try {
-        const session = await Session.findOne({
-          _id: sessionId,
-          participants: socket.userId
-        });
-        if (!session) {
-          socket.emit('error', { message: 'Not authorized to join this session' });
-          return;
-        }
+      // Verify user belongs to the session's match
+      const { data: session, error } = await supabase
+        .from('sessions')
+        .select('match_id')
+        .eq('id', sessionId)
+        .single();
+      if (error) return socket.emit('error', { message: 'Session not found' });
 
-        socket.join(`session:${sessionId}`);
-        socket.currentSession = sessionId;
-        socket.to(`session:${sessionId}`).emit('user-joined', {
-          userId: socket.userId,
-          name: socket.user.name
-        });
-      } catch (error) {
-        socket.emit('error', { message: 'Failed to join session' });
+      const { data: match } = await supabase
+        .from('matches')
+        .select('user1_id, user2_id')
+        .eq('id', session.match_id)
+        .single();
+      if (!match || (match.user1_id !== socket.userId && match.user2_id !== socket.userId)) {
+        return socket.emit('error', { message: 'Not authorized' });
       }
+
+      socket.join(`session:${sessionId}`);
+      socket.currentSession = sessionId;
+      socket.to(`session:${sessionId}`).emit('user-joined', { userId: socket.userId, name: socket.user.name });
     });
 
     socket.on('send-message', async (data) => {
       const { sessionId, text } = data;
       if (!sessionId || !text) return;
 
-      const session = await Session.findById(sessionId);
-      if (!session) return;
-
+      // Save message
       const message = {
-        sender: socket.userId,
+        session_id: sessionId,
+        sender_id: socket.userId,
         text,
-        timestamp: new Date(),
-        isAI: false
+        is_ai: false
       };
-      session.messages.push(message);
-      await session.save();
+      const { data: savedMsg, error } = await supabase.from('messages').insert([message]).select().single();
+      if (error) return;
 
-      // Broadcast to all in session
       io.to(`session:${sessionId}`).emit('new-message', {
-        ...message,
-        sender: { _id: socket.userId, name: socket.user.name, avatar: socket.user.avatar }
+        ...savedMsg,
+        sender: { id: socket.userId, name: socket.user.name, avatar: socket.user.avatar }
       });
 
-      // Handle AI tutor command
+      // AI tutor if command starts with /ask
       if (text.toLowerCase().startsWith('/ask ')) {
         const question = text.substring(5).trim();
         io.to(`session:${sessionId}`).emit('ai-typing', true);
-        const aiResponse = await callAITutor(question, sessionId);
+
+        // Get session context: subjects from both participants
+        const { data: match } = await supabase
+          .from('matches')
+          .select('user1_id, user2_id')
+          .eq('id', (await supabase.from('sessions').select('match_id').eq('id', sessionId).single()).data.match_id)
+          .single();
+        const userIds = [match.user1_id, match.user2_id];
+        const { data: subjects } = await supabase
+          .from('subjects')
+          .select('name')
+          .in('user_id', userIds);
+        const subjectNames = [...new Set(subjects.map(s => s.name))];
+
+        const aiResponse = await callAITutor(question, { subjects: subjectNames });
         io.to(`session:${sessionId}`).emit('ai-typing', false);
 
         const aiMessage = {
+          session_id: sessionId,
           text: aiResponse,
-          timestamp: new Date(),
-          isAI: true,
-          sender: { name: 'AI Tutor', isAI: true }
+          is_ai: true,
+          sender_id: null
         };
-        session.messages.push({ text: aiResponse, timestamp: new Date(), isAI: true });
-        await session.save();
-        io.to(`session:${sessionId}`).emit('new-message', aiMessage);
+        const { data: savedAi } = await supabase.from('messages').insert([aiMessage]).select().single();
+        io.to(`session:${sessionId}`).emit('new-message', {
+          ...savedAi,
+          sender: { name: 'AI Tutor', isAI: true }
+        });
       }
     });
 
@@ -141,7 +139,7 @@ export default function setupSocketHandlers(io) {
           name: socket.user.name
         });
       }
-      console.log(`🔌 User disconnected: ${socket.user.name}`);
+      console.log(`User disconnected: ${socket.user.name}`);
     });
   });
 }

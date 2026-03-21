@@ -1,10 +1,9 @@
-import admin from '../config/firebase.js';
-import User from '../models/User.js';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config();
 
-/**
- * Middleware to require authentication – verifies Firebase token and loads user.
- * Attaches `req.user` (Mongoose document) and `req.firebaseUser` (decoded token).
- */
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
 export async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -13,53 +12,40 @@ export async function requireAuth(req, res, next) {
     }
 
     const token = authHeader.split(' ')[1];
-    const decodedToken = await admin.auth().verifyIdToken(token);
 
-    // Find or create user in our database
-    let user = await User.findOne({ firebaseUid: decodedToken.uid });
-    if (!user) {
-      // First time login – create basic profile
-      user = await User.create({
-        firebaseUid: decodedToken.uid,
-        email: decodedToken.email || '',
-        name: decodedToken.name || decodedToken.email?.split('@')[0] || 'User',
-        subjects: [],
-        availability: []
-      });
-    } else {
-      user.lastActive = new Date();
-      await user.save();
+    // Verify token with Supabase
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      throw new Error('Invalid token');
     }
 
-    req.user = user;           // Mongoose document
-    req.firebaseUser = decodedToken; // Raw Firebase data
+    // Find or create user in your `users` table
+    let { data: dbUser, error: dbError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('firebase_uid', user.id) // you can keep this field or rename it to supabase_uid
+      .maybeSingle();
 
+    if (!dbUser) {
+      // Create new user
+      const { data: newUser, error: createError } = await supabase
+        .from('users')
+        .insert([{
+          firebase_uid: user.id, // or supabase_uid
+          email: user.email,
+          name: user.user_metadata?.full_name || user.email.split('@')[0],
+        }])
+        .select()
+        .single();
+      if (createError) throw createError;
+      dbUser = newUser;
+    }
+
+    req.user = dbUser;
+    req.authUser = user;
     next();
   } catch (error) {
     console.error('Auth error:', error);
-    if (error.code === 'auth/id-token-expired') {
-      return res.status(401).json({ error: 'Token expired' });
-    }
-    return res.status(401).json({ error: 'Invalid token' });
+    return res.status(401).json({ error: 'Unauthorized' });
   }
-}
-
-/**
- * Optional authentication – does not error if no token, just sets req.user = null.
- * Useful for endpoints that can work with or without login.
- */
-export async function optionalAuth(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      const user = await User.findOne({ firebaseUid: decodedToken.uid });
-      req.user = user;
-      req.firebaseUser = decodedToken;
-    }
-  } catch (error) {
-    // Silently ignore – treat as unauthenticated
-  }
-  next();
 }

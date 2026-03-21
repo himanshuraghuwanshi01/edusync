@@ -1,126 +1,69 @@
 import express from 'express';
-import Session from '../models/Session.js';
-import Match from '../models/Match.js';
+import { Match } from '../models/Match.js';
 import { requireAuth } from '../middleware/auth.js';
+import { findMatchesForUser, calculateMatchScore } from '../utils/matching.js';
 
 const router = express.Router();
 
-/**
- * POST /api/sessions – Create a new study session
- */
-router.post('/', requireAuth, async (req, res) => {
+router.get('/recommendations', requireAuth, async (req, res) => {
   try {
-    const { matchId } = req.body;
-
-    const match = await Match.findOne({
-      _id: matchId,
-      users: req.user._id,
-      status: 'accepted'
-    });
-
-    if (!match) {
-      return res.status(404).json({ error: 'Match not found or not accepted' });
-    }
-
-    const existing = await Session.findOne({
-      match: matchId,
-      status: 'active'
-    });
-
-    if (existing) {
-      return res.status(400).json({ error: 'Active session already exists', session: existing });
-    }
-
-    const session = await Session.create({
-      match: matchId,
-      participants: match.users,
-      status: 'active'
-    });
-
-    await session.populate('participants', 'name avatar');
-    res.status(201).json(session);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/sessions/active – Get user's active session
- */
-router.get('/active', requireAuth, async (req, res) => {
-  try {
-    const session = await Session.findOne({
-      participants: req.user._id,
-      status: 'active'
-    })
-      .populate('participants', 'name avatar')
-      .populate('match');
-
-    res.json(session || null);
+    const limit = parseInt(req.query.limit) || 10;
+    const matches = await findMatchesForUser(req.user.id, limit);
+    res.json(matches);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * POST /api/sessions/:sessionId/end – End a session
- */
-router.post('/:sessionId/end', requireAuth, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   try {
-    const session = await Session.findOne({
-      _id: req.params.sessionId,
-      participants: req.user._id,
-      status: 'active'
-    });
-
-    if (!session) {
-      return res.status(404).json({ error: 'Active session not found' });
+    const { targetUserId } = req.body;
+    const existing = await Match.findByUsers(req.user.id, targetUserId);
+    if (existing) {
+      return res.status(400).json({ error: 'Match already exists', match: existing });
     }
 
-    session.status = 'completed';
-    session.endTime = new Date();
-    await session.save();
+    const score = await calculateMatchScore(req.user.id, targetUserId);
+    const match = await Match.create({
+      user1_id: req.user.id,
+      user2_id: targetUserId,
+      compatibility_score: score,
+      initiated_by: req.user.id,
+      status: 'pending'
+    });
 
-    res.json(session);
+    res.status(201).json(match);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
-/**
- * POST /api/sessions/:sessionId/feedback – Submit feedback
- */
-router.post('/:sessionId/feedback', requireAuth, async (req, res) => {
+router.put('/:matchId/status', requireAuth, async (req, res) => {
   try {
-    const { rating, comment, tags } = req.body;
-    if (!rating || rating < 1 || rating > 5) {
-      return res.status(400).json({ error: 'Rating must be 1-5' });
+    const { status } = req.body;
+    if (!['accepted','rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const session = await Session.findOne({
-      _id: req.params.sessionId,
-      participants: req.user._id
-    });
-
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+    const match = await Match.findById(req.params.matchId);
+    if (!match) return res.status(404).json({ error: 'Match not found' });
+    if (match.user1_id !== req.user.id && match.user2_id !== req.user.id) {
+      return res.status(403).json({ error: 'Not authorized' });
     }
 
-    if (session.feedback.some(f => f.user.toString() === req.user._id.toString())) {
-      return res.status(400).json({ error: 'Feedback already submitted' });
-    }
-
-    session.feedback.push({
-      user: req.user._id,
-      rating,
-      comment: comment || '',
-      tags: tags || []
-    });
-
-    await session.save();
-    res.json({ message: 'Feedback submitted' });
+    const updated = await Match.updateStatus(req.params.matchId, status);
+    res.json(updated);
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/my-matches', requireAuth, async (req, res) => {
+  try {
+    const matches = await Match.getUserMatches(req.user.id);
+    res.json(matches);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

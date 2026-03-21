@@ -1,29 +1,54 @@
-import mongoose from 'mongoose';
+import { supabase } from '../config/supabase.js';
 
-const userSchema = new mongoose.Schema({
-  firebaseUid: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  subjects: [{
-    name: { type: String, required: true },
-    level: { type: String, enum: ['beginner', 'intermediate', 'advanced'], default: 'beginner' }
-  }],
-  availability: [{
-    day: { type: String, enum: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] },
-    startTime: String, // "HH:MM"
-    endTime: String    // "HH:MM"
-  }],
-  timezone: { type: String, default: 'UTC' },
-  bio: { type: String, maxlength: 500 },
-  learningStyle: {
-    visual: { type: Boolean, default: false },
-    auditory: { type: Boolean, default: false },
-    kinesthetic: { type: Boolean, default: false }
+export const User = {
+  async findById(id) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data;
   },
-  embedding: { type: [Number], default: undefined },
-  avatar: { type: String, default: '' },
-  createdAt: { type: Date, default: Date.now },
-  lastActive: { type: Date, default: Date.now }
-});
 
-export default mongoose.model('User', userSchema);
+  async findByFirebaseUid(uid) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('firebase_uid', uid)
+      .maybeSingle(); // returns null if not found
+    if (error && error.code !== 'PGRST116') throw error;
+    return data;
+  },
+
+  async create(userData) {
+    const { data, error } = await supabase
+      .from('users')
+      .insert([userData])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id, updates) {
+    const { data, error } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async findCandidates(userId) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .neq('id', userId)
+      .limit(100);
+    if (error) throw error;
+    return data;
+  }
+};
