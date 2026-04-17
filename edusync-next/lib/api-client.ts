@@ -82,30 +82,30 @@ class ApiClient {
     );
   }
 
-  async call(endpoint: string, options: RequestInit = {}) {
-    return this.callWithRetry(endpoint, options);
+  async call<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.callWithRetry<T>(endpoint, options);
   }
 
-  async get(endpoint: string) {
-    return this.call(endpoint, { method: 'GET' });
+  async get<T = unknown>(endpoint: string): Promise<T> {
+    return this.call<T>(endpoint, { method: 'GET' });
   }
 
   async post<T = unknown>(endpoint: string, data: unknown): Promise<T> {
-    return this.call(endpoint, {
+    return this.call<T>(endpoint, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async put<T = unknown>(endpoint: string, data: unknown): Promise<T> {
-    return this.call(endpoint, {
+    return this.call<T>(endpoint, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   }
 
-  async delete(endpoint: string) {
-    return this.call(endpoint, { method: 'DELETE' });
+  async delete<T = unknown>(endpoint: string): Promise<T> {
+    return this.call<T>(endpoint, { method: 'DELETE' });
   }
 }
 
