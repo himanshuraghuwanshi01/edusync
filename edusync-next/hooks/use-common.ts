@@ -100,7 +100,7 @@ export function useFetch<T>(url: string, skip = false) {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await apiClient.get(url);
+        const response = await apiClient.get<{ data: T }>(url);
         setData(response.data);
         setLoading(false);
       } catch (err) {
