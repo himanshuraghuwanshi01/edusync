@@ -1,0 +1,17 @@
+{
+  "name": "edusync-root",
+  "version": "1.0.0",
+  "description": "EduSync - AI-powered peer learning platform",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd edusync-next && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "cd edusync-next && npm run build",
+    "start:backend": "cd backend && npm run start",
+    "start:frontend": "cd edusync-next && npm run start",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
