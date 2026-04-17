@@ -1,4 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? "/api" : "http://127.0.0.1:5000/api");
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || (globalThis.window === undefined ? "http://127.0.0.1:5000/api" : "/api");
 
 export const api = {
   async register(name: string, email: string) {

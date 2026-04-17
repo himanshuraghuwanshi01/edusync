@@ -19,10 +19,10 @@ RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
 # Copy configuration and script
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
 
-# Build Next.js frontend
-RUN cd edusync-next && npm run build
+# Build Next.js frontend and prepare script
+RUN chmod +x /app/start.sh && \
+    cd edusync-next && npm run build
 
 # Expose the required port
 EXPOSE 7860

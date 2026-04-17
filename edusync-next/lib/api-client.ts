@@ -4,21 +4,21 @@ import { toast } from 'sonner';
  * Enhanced API Client with error handling and automatic retries
  */
 class ApiClient {
-  private baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-  private retryAttempts = 3;
-  private retryDelay = 1000;
+  private readonly baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  private readonly retryAttempts = 3;
+  private readonly retryDelay = 1000;
 
   private getToken(): string | null {
-    if (typeof window === 'undefined') return null;
+    if (globalThis.window === undefined) return null;
     return localStorage.getItem('token');
   }
 
   private async handleResponse(response: Response) {
     if (response.status === 401) {
-      if (typeof window !== 'undefined') {
+      if (globalThis.window !== undefined) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        window.location.href = '/login';
+        globalThis.location.href = '/login';
       }
       throw new Error('Unauthorized - please login again');
     }
@@ -33,17 +33,20 @@ class ApiClient {
     return response.json();
   }
 
-  private async callWithRetry(
+  private async callWithRetry<T = unknown>(
     endpoint: string,
     options: RequestInit,
     attempt = 0
-  ): Promise<any> {
+  ): Promise<T> {
     try {
       const token = this.getToken();
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        ...(options.headers as Record<string, string> || {}),
       };
+      
+      if (options.headers) {
+        Object.assign(headers, options.headers);
+      }
 
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -87,14 +90,14 @@ class ApiClient {
     return this.call(endpoint, { method: 'GET' });
   }
 
-  async post(endpoint: string, data: any) {
+  async post<T = unknown>(endpoint: string, data: unknown): Promise<T> {
     return this.call(endpoint, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async put(endpoint: string, data: any) {
+  async put<T = unknown>(endpoint: string, data: unknown): Promise<T> {
     return this.call(endpoint, {
       method: 'PUT',
       body: JSON.stringify(data),
