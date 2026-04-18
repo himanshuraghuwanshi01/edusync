@@ -49,10 +49,9 @@ export const notify = {
       loading: string;
       success: string;
       error: string;
-    },
-    options = {}
+    }
   ) => {
-    return toast.promise(promise, messages, options);
+    return toast.promise(promise, messages);
   },
 
   /**
